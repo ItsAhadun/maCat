@@ -6,21 +6,20 @@ SourceCode: https://github.com/ItsAhadun/maCat
 IssueTracker: https://github.com/ItsAhadun/maCat/issues
 
 AutoName: maCat
-Summary: Catalogue your wardrobe and browse it with a full-screen swipe feed
 Description: |-
-    maCat is a simple personal catalogue for clothes, shoes and jewellery.
-    Photograph each item and browse your wardrobe full-screen, one item at a
-    time, with a vertical swipe feed like short-video apps.
+  maCat is a simple personal catalogue for clothes, shoes and jewellery.
+  Photograph each item and browse your wardrobe full-screen, one item at a
+  time, with a vertical swipe feed like short-video apps.
 
-    Features:
+  Features:
 
-    * Add items one at a time with the in-app camera or from the gallery
-    * Bulk add: photograph everything first, then name each item
-    * Organise and filter by category: clothes, shoes, jewellery
-    * Looping full-screen feed plus a grid overview for jumping around
-    * Edit and delete items
-    * Adaptive layout for phones and foldables
-    * Everything stays on the device: no accounts, no network access, no tracking
+  * Add items one at a time with the in-app camera or from the gallery
+  * Bulk add: photograph everything first, then name each item
+  * Organise and filter by category: clothes, shoes, jewellery
+  * Looping full-screen feed plus a grid overview for jumping around
+  * Edit and delete items
+  * Adaptive layout for phones and foldables
+  * Everything stays on the device: no accounts, no network access, no tracking
 
 RepoType: git
 Repo: https://github.com/ItsAhadun/maCat.git
