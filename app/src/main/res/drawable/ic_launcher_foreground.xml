@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A cat head perched on a clothes hanger — maCat. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- hanger -->
+    <path
+        android:pathData="M54,55.5 L36,69 L72,69 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <!-- ears -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,38.5 L41.5,27.5 L52,32 Z M63,38.5 L66.5,27.5 L56,32 Z" />
+    <!-- head with punched-out eyes and nose (evenOdd keeps them visible in monochrome) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M43.5,45 a10.5,10.5 0 1 0 21,0 a10.5,10.5 0 1 0 -21,0 Z
+            M47.7,44 a1.8,1.8 0 1 0 3.6,0 a1.8,1.8 0 1 0 -3.6,0 Z
+            M56.7,44 a1.8,1.8 0 1 0 3.6,0 a1.8,1.8 0 1 0 -3.6,0 Z
+            M52.6,48 L55.4,48 L54,50 Z" />
+</vector>
