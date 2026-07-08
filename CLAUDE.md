@@ -8,9 +8,10 @@ distributed via F-Droid. GPL-3.0-only.
 - The F-Droid build recipe does NOT live here. It lives in the fdroiddata repo:
   `metadata/com.ahad.macat.yml` at https://gitlab.com/fdroid/fdroiddata. This repo is
   only the app source code that the recipe points at.
-- F-Droid builds from **git tags** (`commit: vX.Y` in the recipe), never from `main`.
-  Pushing to `main` has no effect on published builds, so development can continue
-  freely at any time.
+- F-Droid builds from **tagged commits**, never from `main`. The recipe's `commit:`
+  field must be the **full commit hash** of the tag's commit, not the tag or branch
+  name (reviewer requirement). Pushing to `main` has no effect on published builds,
+  so development can continue freely at any time.
 - Version updates are **automatic** — no fdroiddata merge request is needed. The recipe
   has `AutoUpdateMode: Version` and `UpdateCheckMode: Tags ^v[\d.]+$`, so F-Droid's
   checkupdates bot picks up new tags by itself.
@@ -35,10 +36,12 @@ distributed via F-Droid. GPL-3.0-only.
 
 - Maintained in this repo under `fastlane/metadata/android/en-US/`
   (`title.txt`, `short_description.txt`, `full_description.txt`, `changelogs/`).
-- `metadata/com.ahad.macat.yml` and `metadata/com.ahad.macat/en-US/summary.txt` in this
-  repo are reference copies of what was submitted to fdroiddata; the authoritative
-  copies live in the fdroiddata repo, where localized files take precedence over the
-  in-repo fastlane ones. Keep the two in sync when editing descriptions.
+- The fastlane files are the **only** place summary/description live. F-Droid pulls
+  them from this repo **at the tagged build commit**, so every release tag must contain
+  the current fastlane files. Do not add `Summary:`/`Description:` (or localized
+  `metadata/<appid>/en-US/` text files) to fdroiddata — the reviewer rejects that.
+- `metadata/com.ahad.macat.yml` in this repo is a reference copy of the fdroiddata
+  recipe; the authoritative copy lives in the fdroiddata repo. Keep the two in sync.
 - Short description must stay ≤ 80 characters (F-Droid CI enforces this).
 
 ## History / links
@@ -46,6 +49,7 @@ distributed via F-Droid. GPL-3.0-only.
 - Initial inclusion MR: https://gitlab.com/fdroid/fdroiddata/-/merge_requests/42319
   (submitted from fork https://gitlab.com/ItsAhadun/ma-cat, branch
   `ItsAhadun-master-patch-12565`).
-- fdroiddata CI gotchas hit during submission: `Description:` blocks must use 2-space
-  indentation (canonical `fdroid rewritemeta` format), and `Summary:` must not appear
-  in the yml — it belongs in `metadata/<appid>/en-US/summary.txt` so it is translatable.
+- Review feedback hit during submission: no `Summary:`/`Description:` in fdroiddata at
+  all (they are pulled from this repo's fastlane structure at the build commit), and
+  `commit:` must be the full commit hash, not a tag or branch. v1.1 (versionCode 2,
+  commit c8acdde) was cut because the v1.0 commit predated the fastlane files.
