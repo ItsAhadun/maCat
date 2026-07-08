@@ -9,6 +9,7 @@ AutoName: maCat
 
 RepoType: git
 Repo: https://github.com/ItsAhadun/maCat.git
+Binaries: https://github.com/ItsAhadun/maCat/releases/download/v%v/maCat-%v.apk
 
 Builds:
   - versionName: '1.1'
@@ -17,6 +18,8 @@ Builds:
     subdir: app
     gradle:
       - yes
+
+AllowedAPKSigningKeys: 89ad54255e2e35a92d59ba0625c60ab08f28c0da1f85c5011ce537776c86f717
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[\d.]+$

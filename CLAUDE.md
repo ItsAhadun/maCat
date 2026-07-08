@@ -21,6 +21,16 @@ distributed via F-Droid. GPL-3.0-only.
 1. Bump `versionCode` (integer, +1) and `versionName` in `app/build.gradle.kts`.
 2. Add `fastlane/metadata/android/en-US/changelogs/<new versionCode>.txt`.
 3. Commit, tag `vX.Y` (must match `^v[\d.]+$`), push the commit and the tag.
+4. **Reproducible builds**: build `:app:assembleRelease` from a *clean checkout of the
+   tag* (never a dirty working tree), sign the unsigned APK with the release keystore
+   (`C:\Users\a\keystores\macat-release.keystore`, instructions in
+   `C:\Users\a\keystores\README-macat.md` — must use **build-tools 34.0.0 apksigner**),
+   and attach it to a GitHub release for the tag named `maCat-<versionName>.apk`.
+   Do this immediately after pushing the tag: F-Droid downloads it from
+   `releases/download/v%v/maCat-%v.apk` (the `Binaries:` field) and only publishes
+   if their build is byte-identical. The APK is signed with the developer key
+   (cert SHA-256 pinned in `AllowedAPKSigningKeys`); losing the keystore means the
+   app can never be updated again.
 
 ## Hard constraints — do not break these
 
