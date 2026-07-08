@@ -22,3 +22,6 @@ keystore.properties
 *.hprof
 # personal working notes, not part of the app
 /tasks/
+# local copy of the signed release APK — must never be committed
+# (F-Droid's scanner rejects prebuilt binaries in the source tree)
+/releaseapk/

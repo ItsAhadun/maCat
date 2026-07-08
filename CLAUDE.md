@@ -31,6 +31,9 @@ distributed via F-Droid. GPL-3.0-only.
    if their build is byte-identical. The APK is signed with the developer key
    (cert SHA-256 pinned in `AllowedAPKSigningKeys`); losing the keystore means the
    app can never be updated again.
+5. Copy the signed APK to `releaseapk/` in this repo (replace the previous one) so
+   the user always has the latest release APK at hand. The folder is gitignored —
+   never commit APKs; F-Droid's scanner rejects prebuilt binaries in the source tree.
 
 ## Hard constraints — do not break these
 
