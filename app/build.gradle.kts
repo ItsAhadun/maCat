@@ -12,14 +12,19 @@ android {
         applicationId = "com.ahad.macat"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            vcsInfo {
+                // F-Droid reproducible builds: the embedded VCS info differs between
+                // build environments, breaking byte-identical verification.
+                include = false
+            }
         }
     }
     compileOptions {
