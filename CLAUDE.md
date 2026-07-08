@@ -18,6 +18,12 @@ distributed via F-Droid. GPL-3.0-only.
 
 ## Release checklist (new version)
 
+When the user asks for a new version (e.g. "make it v1.3"), run this **entire checklist
+end-to-end without further prompting** — a release is not done until the signed APK is both
+attached to the GitHub release *and* copied into `releaseapk/`. Build and sign from the
+local tag first, then push the commit and tag and create the GitHub release right away, so
+the public tag never exists without its binary.
+
 1. Bump `versionCode` (integer, +1) and `versionName` in `app/build.gradle.kts`.
 2. Add `fastlane/metadata/android/en-US/changelogs/<new versionCode>.txt`.
 3. Commit, tag `vX.Y` (must match `^v[\d.]+$`), push the commit and the tag.

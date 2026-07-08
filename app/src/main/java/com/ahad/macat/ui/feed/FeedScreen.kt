@@ -1,6 +1,17 @@
 package com.ahad.macat.ui.feed
 
+import android.os.SystemClock
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,13 +48,22 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -111,6 +131,22 @@ fun FeedScreen(
           }
         }
 
+        // Gate pinch-to-zoom: never while a page swipe/fling is in flight, and not within a
+        // short window after it settles, so fast scrolling can't register as a pinch.
+        var scrollSettledAt by remember { mutableLongStateOf(0L) }
+        LaunchedEffect(pagerState) {
+          snapshotFlow { pagerState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) scrollSettledAt = SystemClock.uptimeMillis()
+          }
+        }
+        val pinchAllowed =
+          remember(pagerState) {
+            {
+              !pagerState.isScrollInProgress &&
+                SystemClock.uptimeMillis() - scrollSettledAt >= PINCH_DEBOUNCE_AFTER_SCROLL_MS
+            }
+          }
+
         VerticalPager(
           state = pagerState,
           modifier = Modifier.fillMaxSize(),
@@ -120,6 +156,7 @@ fun FeedScreen(
           ItemPage(
             item = item,
             photoModel = viewModel.photoFile(item),
+            pinchAllowed = pinchAllowed,
             onEdit = {
               // Come back to this item when the edit screen closes.
               viewModel.requestScrollTo(item.id)
@@ -161,21 +198,74 @@ fun FeedScreen(
   }
 }
 
+/** Cap on transient pinch zoom. */
+private const val MAX_PINCH_ZOOM = 4f
+
+/** Pinches that begin within this window after a page scroll settles are ignored. */
+private const val PINCH_DEBOUNCE_AFTER_SCROLL_MS = 150L
+
 @Composable
 private fun ItemPage(
   item: Item,
   photoModel: Any,
+  pinchAllowed: () -> Boolean,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
 ) {
   BoxWithConstraints(Modifier.fillMaxSize()) {
     // On wide layouts (unfolded Fold, landscape) show the whole photo instead of cropping.
     val contentScale = if (maxWidth > maxHeight) ContentScale.Fit else ContentScale.Crop
+
+    // Transient pinch-to-zoom: the photo tracks the fingers exactly while pinching (snap spec)
+    // and springs back to normal when released.
+    var pinching by remember { mutableStateOf(false) }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var pan by remember { mutableStateOf(Offset.Zero) }
+    var pinchOrigin by remember { mutableStateOf(TransformOrigin.Center) }
+    val shownZoom by
+      animateFloatAsState(
+        targetValue = zoom,
+        animationSpec = if (pinching) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "pinchZoom",
+      )
+    val shownPan by
+      animateOffsetAsState(
+        targetValue = pan,
+        animationSpec = if (pinching) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "pinchPan",
+      )
+
     AsyncImage(
       model = photoModel,
       contentDescription = item.name,
       contentScale = contentScale,
-      modifier = Modifier.fillMaxSize(),
+      modifier =
+        Modifier.fillMaxSize()
+          .pointerInput(pinchAllowed) {
+            detectPinchToZoom(
+              pinchAllowed = pinchAllowed,
+              onStart = { centroid ->
+                pinchOrigin = TransformOrigin(centroid.x / size.width, centroid.y / size.height)
+                pinching = true
+              },
+              onPinch = { panChange, zoomChange ->
+                zoom = (zoom * zoomChange).coerceIn(1f, MAX_PINCH_ZOOM)
+                pan += panChange
+              },
+              onEnd = {
+                pinching = false
+                zoom = 1f
+                pan = Offset.Zero
+              },
+            )
+          }
+          .graphicsLayer {
+            scaleX = shownZoom
+            scaleY = shownZoom
+            translationX = shownPan.x
+            translationY = shownPan.y
+            transformOrigin = pinchOrigin
+          },
     )
 
     Box(
@@ -212,6 +302,41 @@ private fun ItemPage(
         Icon(Icons.Default.Delete, contentDescription = "Delete item", tint = Color.White)
       }
     }
+  }
+}
+
+/**
+ * Pinch detector tuned to coexist with the pager. A second finger claims the gesture outright
+ * — from then on events are consumed so the pager can't scroll mid-pinch — while one-finger
+ * swipes pass through untouched. Waiting for pinch movement past touch slop instead would race
+ * the pager's own slop detection, which wins whenever one finger moves more than the other (as
+ * natural pinches do) and kills the zoom. [pinchAllowed] vetoes pinches that begin while the
+ * pager is scrolling or has only just settled, so fast paging with a stray second finger never
+ * zooms.
+ */
+private suspend fun PointerInputScope.detectPinchToZoom(
+  pinchAllowed: () -> Boolean,
+  onStart: (centroid: Offset) -> Unit,
+  onPinch: (pan: Offset, zoom: Float) -> Unit,
+  onEnd: () -> Unit,
+) {
+  awaitEachGesture {
+    var active = false
+    awaitFirstDown(requireUnconsumed = false)
+    while (true) {
+      val event = awaitPointerEvent()
+      if (event.changes.none { it.pressed }) break
+      if (!active) {
+        if (event.changes.count { it.pressed } < 2) continue // one finger: the pager's gesture
+        if (event.changes.any { it.isConsumed }) break // the pager already claimed this gesture
+        if (!pinchAllowed()) break // mid-swipe or just settled — never zoom
+        active = true
+        onStart(event.calculateCentroid())
+      }
+      onPinch(event.calculatePan(), event.calculateZoom())
+      event.changes.forEach { if (it.positionChanged()) it.consume() }
+    }
+    if (active) onEnd()
   }
 }
 

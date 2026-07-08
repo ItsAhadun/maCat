@@ -1,0 +1,1 @@
+Pinch to zoom photos in the feed: the picture follows your fingers while pinching and springs back when released. Swiping between items is unaffected.
