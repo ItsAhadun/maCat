@@ -4,43 +4,150 @@ import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ahad.macat.data.BUILT_IN_CATEGORIES
+import com.ahad.macat.data.BackupManager
 import com.ahad.macat.data.Category
+import com.ahad.macat.data.Colour
+import com.ahad.macat.data.CropRect
+import com.ahad.macat.data.FilterState
+import com.ahad.macat.data.FilterVisibility
 import com.ahad.macat.data.Item
 import com.ahad.macat.data.ItemRepository
+import com.ahad.macat.data.SettingsStore
+import com.ahad.macat.data.SortOrder
+import com.ahad.macat.data.colourCounts
+import com.ahad.macat.data.coloursPresent
+import com.ahad.macat.data.filterAndSort
 import java.io.File
+import kotlin.random.Random
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /** One photo collected in the bulk-add flow, plus the info the user types for it. */
 data class BulkEntry(
   val photoUri: Uri,
   val name: String = "",
-  val category: Category = Category.CLOTHES,
+  val category: String,
+  val colour: Colour? = null,
+  val crop: CropRect? = null,
 )
 
-class CatalogueViewModel(private val repository: ItemRepository) : ViewModel() {
+/**
+ * A one-shot message for the snackbar. [action] is what its button does — undoing a delete, in
+ * practice — and is null for messages that are only telling the user something.
+ */
+data class UiMessage(
+  val text: String,
+  val actionLabel: String? = null,
+  val action: (() -> Unit)? = null,
+)
+
+class CatalogueViewModel(
+  private val repository: ItemRepository,
+  private val backupManager: BackupManager,
+  private val settings: SettingsStore,
+) : ViewModel() {
 
   /** null = still loading (avoids flashing the empty state on launch). */
   val allItems: StateFlow<List<Item>?> =
     repository.items.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-  private val _filter = MutableStateFlow<Category?>(null)
-  val filter: StateFlow<Category?> = _filter.asStateFlow()
+  val categories: StateFlow<List<Category>> =
+    repository.categories.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+  val deletedItems: StateFlow<List<Item>> =
+    repository.deletedItems.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+  private val _filterState = MutableStateFlow(FilterState())
+  val filterState: StateFlow<FilterState> = _filterState.asStateFlow()
+
+  val filterVisibility: StateFlow<FilterVisibility> = settings.filterVisibility
 
   val filteredItems: StateFlow<List<Item>?> =
-    combine(allItems, _filter) { items, filter ->
-        if (filter == null) items else items?.filter { it.category == filter }
-      }
+    combine(allItems, _filterState) { items, state -> items?.filterAndSort(state) }
       .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-  fun setFilter(category: Category?) {
-    _filter.value = category
+  /** Only the colours the catalogue actually contains — the swatch row shows nothing else. */
+  val availableColours: StateFlow<List<Colour>> =
+    allItems
+      .map { it.orEmpty().coloursPresent() }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+  /** Colour totals for the census, largest share first. */
+  val colourCensus: StateFlow<List<Pair<Colour, Int>>> =
+    allItems
+      .map { it.orEmpty().colourCounts() }
+      .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+  init {
+    // Free the photos of anything that has sat in the bin past its retention window.
+    viewModelScope.launch { repository.purgeExpired() }
+    // A hidden filter must not go on narrowing the catalogue from off-screen: that is
+    // indistinguishable from items having disappeared. Clearing belongs here rather than in an
+    // effect beside the control, because the ViewModel outlives every screen that draws one.
+    viewModelScope.launch {
+      settings.filterVisibility.collect { visible ->
+        _filterState.update { state ->
+          state.copy(
+            category = state.category?.takeIf { visible.categories },
+            colour = state.colour?.takeIf { visible.colours },
+            favouritesOnly = state.favouritesOnly && visible.favourites,
+            query = if (visible.search) state.query else "",
+            sort = if (visible.sort) state.sort else SortOrder.NEWEST,
+          )
+        }
+      }
+    }
   }
+
+  // Filters.
+
+  fun setCategoryFilter(category: String?) {
+    _filterState.update { it.copy(category = category) }
+  }
+
+  fun setColourFilter(colour: Colour?) {
+    _filterState.update { it.copy(colour = colour) }
+  }
+
+  fun toggleFavouritesOnly() {
+    _filterState.update { it.copy(favouritesOnly = !it.favouritesOnly) }
+  }
+
+  fun setQuery(query: String) {
+    _filterState.update { it.copy(query = query) }
+  }
+
+  /** Picking shuffle — or picking it again — deals a fresh order; the other sorts are stable. */
+  fun setSort(sort: SortOrder) {
+    _filterState.update {
+      if (sort == SortOrder.SHUFFLE) {
+        it.copy(sort = sort, shuffleSeed = Random.nextLong())
+      } else {
+        it.copy(sort = sort)
+      }
+    }
+  }
+
+  fun setFilterVisibility(visibility: FilterVisibility) {
+    settings.setFilterVisibility(visibility)
+  }
+
+  /** What a new item is filed under when the user does not say: whatever they are looking at. */
+  val defaultCategory: String
+    get() =
+      _filterState.value.category
+        ?: categories.value.firstOrNull()?.name
+        ?: BUILT_IN_CATEGORIES.first()
 
   /** Set by the grid so the feed can scroll to the tapped item. */
   private val _scrollToItemId = MutableStateFlow<Long?>(null)
@@ -60,23 +167,163 @@ class CatalogueViewModel(private val repository: ItemRepository) : ViewModel() {
 
   fun newCaptureFile(): File = repository.newCaptureFile()
 
-  fun addItem(name: String, category: Category, photoUri: Uri) {
-    viewModelScope.launch { repository.addItem(name, category, photoUri) }
+  /** The colour tag guessed from a photo, for the auto name and the colour chip. */
+  suspend fun detectColour(uri: Uri): Colour? = repository.detectColour(uri)
+
+  fun addItem(name: String, category: String, photoUri: Uri, colour: Colour?, crop: CropRect?) {
+    viewModelScope.launch { repository.addItem(name, category, photoUri, colour, crop) }
   }
 
-  fun updateItem(item: Item, name: String, category: Category, newPhotoUri: Uri?) {
-    viewModelScope.launch { repository.updateItem(item, name, category, newPhotoUri) }
+  fun updateItem(
+    item: Item,
+    name: String,
+    category: String,
+    newPhotoUri: Uri?,
+    colour: Colour?,
+    crop: CropRect?,
+  ) {
+    viewModelScope.launch {
+      repository.updateItem(item, name, category, newPhotoUri, colour, crop)
+    }
   }
+
+  fun setFavourite(item: Item, favourite: Boolean) {
+    viewModelScope.launch { repository.setFavourite(item, favourite) }
+  }
+
+  // Deleting. Nothing is destroyed here — items go to the bin and come back from it, and the
+  // photo file outlives both so Undo and Restore have something to restore.
 
   fun deleteItem(item: Item) {
-    viewModelScope.launch { repository.deleteItem(item) }
+    viewModelScope.launch {
+      repository.softDelete(item)
+      send(
+        UiMessage("Deleted “${item.displayName}”", "Undo") {
+          viewModelScope.launch { repository.restore(item) }
+        }
+      )
+    }
+  }
+
+  fun restoreItem(item: Item) {
+    viewModelScope.launch { repository.restore(item) }
+  }
+
+  fun purgeItem(item: Item) {
+    viewModelScope.launch { repository.purgeAll(listOf(item)) }
+  }
+
+  fun emptyBin() {
+    val binned = deletedItems.value
+    viewModelScope.launch {
+      repository.purgeAll(binned)
+      send(UiMessage("Bin emptied"))
+    }
+  }
+
+  // Bulk actions on the grid selection.
+
+  private val _selection = MutableStateFlow<Set<Long>>(emptySet())
+  val selection: StateFlow<Set<Long>> = _selection.asStateFlow()
+
+  fun toggleSelected(itemId: Long) {
+    _selection.update { if (itemId in it) it - itemId else it + itemId }
+  }
+
+  fun clearSelection() {
+    _selection.value = emptySet()
+  }
+
+  private fun selectedItems(): List<Item> {
+    val ids = _selection.value
+    return allItems.value.orEmpty().filter { it.id in ids }
+  }
+
+  fun deleteSelected() {
+    val items = selectedItems()
+    if (items.isEmpty()) return
+    clearSelection()
+    viewModelScope.launch {
+      repository.softDeleteAll(items)
+      send(
+        UiMessage("Deleted ${items.size.itemsLabel()}", "Undo") {
+          viewModelScope.launch { repository.restoreAll(items) }
+        }
+      )
+    }
+  }
+
+  fun setCategoryOfSelected(category: String) {
+    val items = selectedItems()
+    if (items.isEmpty()) return
+    clearSelection()
+    viewModelScope.launch {
+      repository.setCategoryAll(items, category)
+      send(UiMessage("Moved ${items.size.itemsLabel()} to $category"))
+    }
+  }
+
+  fun setFavouriteOnSelected(favourite: Boolean) {
+    val items = selectedItems()
+    if (items.isEmpty()) return
+    clearSelection()
+    viewModelScope.launch { repository.setFavouriteAll(items, favourite) }
+  }
+
+  // Categories.
+
+  fun addCategory(name: String) {
+    viewModelScope.launch {
+      if (!repository.addCategory(name)) send(UiMessage("That category already exists"))
+    }
+  }
+
+  fun renameCategory(category: Category, newName: String) {
+    viewModelScope.launch {
+      val renamed = repository.renameCategory(category, newName)
+      if (!renamed) {
+        send(UiMessage("That category already exists"))
+        return@launch
+      }
+      // The filter points at a name that no longer exists; follow the rename.
+      _filterState.update {
+        if (it.category == category.name) it.copy(category = newName.trim()) else it
+      }
+    }
+  }
+
+  fun moveCategory(category: Category, by: Int) {
+    val ordered = categories.value.toMutableList()
+    val index = ordered.indexOfFirst { it.id == category.id }
+    val target = index + by
+    if (index < 0 || target !in ordered.indices) return
+    ordered.add(target, ordered.removeAt(index))
+    viewModelScope.launch { repository.reorderCategories(ordered) }
+  }
+
+  /** How many live items would be stranded by deleting [category]. */
+  suspend fun countInCategory(category: Category): Int = repository.countInCategory(category.name)
+
+  fun deleteCategory(category: Category, replacement: String) {
+    viewModelScope.launch {
+      if (!repository.deleteCategory(category, replacement)) return@launch
+      _filterState.update {
+        if (it.category == category.name) it.copy(category = replacement) else it
+      }
+    }
   }
 
   // Bulk add state lives here so it survives configuration changes (fold/unfold, rotation).
   val bulkEntries = mutableStateListOf<BulkEntry>()
 
   fun bulkAddPhoto(uri: Uri) {
-    bulkEntries.add(BulkEntry(photoUri = uri, category = _filter.value ?: Category.CLOTHES))
+    bulkEntries.add(BulkEntry(photoUri = uri, category = defaultCategory))
+    // Tag it in the background so the details step already has colours and auto names waiting.
+    viewModelScope.launch {
+      val colour = repository.detectColour(uri) ?: return@launch
+      val index = bulkEntries.indexOfFirst { it.photoUri == uri && it.colour == null }
+      if (index >= 0) bulkEntries[index] = bulkEntries[index].copy(colour = colour)
+    }
   }
 
   fun bulkUpdateEntry(index: Int, entry: BulkEntry) {
@@ -95,7 +342,43 @@ class CatalogueViewModel(private val repository: ItemRepository) : ViewModel() {
     val entries = bulkEntries.toList()
     bulkClear()
     viewModelScope.launch {
-      entries.forEach { repository.addItem(it.name.trim(), it.category, it.photoUri) }
+      entries.forEach {
+        repository.addItem(it.name.trim(), it.category, it.photoUri, it.colour, it.crop)
+      }
     }
   }
+
+  // Backup / restore. Results are surfaced as one-shot messages the UI shows in the snackbar.
+  private val _messages = Channel<UiMessage>(Channel.BUFFERED)
+  val messages = _messages.receiveAsFlow()
+
+  private suspend fun send(message: UiMessage) {
+    _messages.send(message)
+  }
+
+  fun exportBackup(uri: Uri) {
+    viewModelScope.launch {
+      val message =
+        try {
+          "Backed up ${backupManager.export(uri).itemsLabel()}"
+        } catch (e: Exception) {
+          "Backup failed"
+        }
+      send(UiMessage(message))
+    }
+  }
+
+  fun importBackup(uri: Uri) {
+    viewModelScope.launch {
+      val message =
+        try {
+          "Restored ${backupManager.import(uri).itemsLabel()}"
+        } catch (e: Exception) {
+          "Couldn’t read that backup file"
+        }
+      send(UiMessage(message))
+    }
+  }
+
+  private fun Int.itemsLabel() = "$this item${if (this == 1) "" else "s"}"
 }

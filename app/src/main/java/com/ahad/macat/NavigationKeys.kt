@@ -11,3 +11,9 @@ import kotlinx.serialization.Serializable
 @Serializable data class AddItem(val itemId: Long? = null) : NavKey
 
 @Serializable data object BulkAdd : NavKey
+
+@Serializable data object ColourCensus : NavKey
+
+@Serializable data object RecentlyDeleted : NavKey
+
+@Serializable data object Settings : NavKey

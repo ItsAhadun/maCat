@@ -3,6 +3,8 @@ package com.ahad.macat.ui.add
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -31,6 +34,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -48,10 +52,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.ahad.macat.data.autoName
 import com.ahad.macat.ui.CatalogueViewModel
+import com.ahad.macat.ui.croppedPhotoModel
 
 /** Two-step bulk add: 1) collect photos (camera or gallery), 2) name + categorize each. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -198,6 +208,25 @@ private fun AnnotateStep(
 ) {
   val entries = viewModel.bulkEntries
   val pagerState = rememberPagerState(pageCount = { entries.size })
+  val context = LocalContext.current
+  val categories by viewModel.categories.collectAsStateWithLifecycle()
+  val haptics = LocalHapticFeedback.current
+
+  var framingPage by rememberSaveable { mutableStateOf<Int?>(null) }
+  val framingIndex = framingPage
+  val framingEntry = framingIndex?.let(entries::getOrNull)
+  if (framingIndex != null && framingEntry != null) {
+    FramingScreen(
+      photo = framingEntry.photoUri,
+      initialCrop = framingEntry.crop,
+      onDone = {
+        viewModel.bulkUpdateEntry(framingIndex, framingEntry.copy(crop = it))
+        framingPage = null
+      },
+      onCancel = { framingPage = null },
+    )
+    return
+  }
 
   Column(modifier.fillMaxSize().imePadding()) {
     HorizontalPager(state = pagerState, modifier = Modifier.weight(1f)) { page ->
@@ -211,43 +240,82 @@ private fun AnnotateStep(
           modifier = Modifier.widthIn(max = 480.dp),
           verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-          Text(
-            "Item ${page + 1} of ${entries.size} — swipe for the next one",
-            style = MaterialTheme.typography.labelLarge,
-          )
+          BulkProgress(page = page, total = entries.size)
           AsyncImage(
-            model = entry.photoUri,
+            model = croppedPhotoModel(context, entry.photoUri, entry.crop, PREVIEW_DECODE_PX),
             contentDescription = "Photo ${page + 1}",
             contentScale = ContentScale.Crop,
             modifier =
-              Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(RoundedCornerShape(16.dp)),
+              Modifier.align(Alignment.CenterHorizontally)
+                .height(PREVIEW_HEIGHT)
+                .aspectRatio(feedAspectRatio())
+                .clip(RoundedCornerShape(16.dp))
+                .clickable { framingPage = page },
           )
+          OutlinedButton(onClick = { framingPage = page }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (entry.crop != null) "Change framing" else "Adjust framing")
+          }
           OutlinedTextField(
             value = entry.name,
             onValueChange = { viewModel.bulkUpdateEntry(page, entry.copy(name = it)) },
-            label = { Text("Name") },
+            label = { Text("Name (optional)") },
+            supportingText = {
+              if (entry.name.isBlank()) {
+                Text("Saved as “${autoName(entry.colour, entry.category)}”")
+              }
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
           )
           CategorySelector(
+            categories = categories,
             selected = entry.category,
             onSelect = { viewModel.bulkUpdateEntry(page, entry.copy(category = it)) },
+            modifier = Modifier.fillMaxWidth(),
+          )
+          ColourSelector(
+            selected = entry.colour,
+            onSelect = { viewModel.bulkUpdateEntry(page, entry.copy(colour = it)) },
+            modifier = Modifier.align(Alignment.Start),
           )
           TextButton(onClick = { viewModel.bulkRemoveEntry(page) }) { Text("Remove this photo") }
         }
       }
     }
 
-    val unnamed = entries.count { it.name.isBlank() }
     Button(
-      onClick = onSaveAll,
-      enabled = entries.isNotEmpty() && unnamed == 0,
+      onClick = {
+        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+        onSaveAll()
+      },
+      enabled = entries.isNotEmpty(),
       modifier = Modifier.fillMaxWidth().padding(16.dp),
     ) {
+      Text("Save all ${entries.size} items")
+    }
+  }
+}
+
+/** Where you are in the stack of photos — a bar, rather than a sentence doing a bar's job. */
+@Composable
+private fun BulkProgress(page: Int, total: Int) {
+  val progress by
+    animateFloatAsState(
+      targetValue = if (total == 0) 0f else (page + 1).toFloat() / total,
+      label = "bulkProgress",
+    )
+  Column(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+      Text("Item ${page + 1} of $total", style = MaterialTheme.typography.labelLarge)
       Text(
-        if (unnamed == 0) "Save all ${entries.size} items"
-        else "$unnamed still need a name"
+        "swipe for the next",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }
+    LinearProgressIndicator(
+      progress = { progress },
+      modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+    )
   }
 }
