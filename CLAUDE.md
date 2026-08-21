@@ -26,7 +26,9 @@ the public tag never exists without its binary.
 
 1. Bump `versionCode` (integer, +1) and `versionName` in `app/build.gradle.kts`.
 2. Add `fastlane/metadata/android/en-US/changelogs/<new versionCode>.txt`.
-3. Commit, tag `vX.Y` (must match `^v[\d.]+$`), push the commit and the tag.
+3. Commit, tag `vX.Y` (must match `^v[\d.]+$`), then push **both** with
+   `git push origin main vX.Y` — a bare `git push` does not push tags. See
+   [Committing and pushing](#committing-and-pushing-so-f-droid-actually-detects-the-release).
 4. **Reproducible builds**: build `:app:assembleRelease` from a *clean checkout of the
    tag* (never a dirty working tree), sign the unsigned APK with the release keystore
    (`C:\Users\a\keystores\macat-release.keystore`, instructions in
@@ -40,6 +42,38 @@ the public tag never exists without its binary.
 5. Copy the signed APK to `releaseapk/` in this repo (replace the previous one) so
    the user always has the latest release APK at hand. The folder is gitignored —
    never commit APKs; F-Droid's scanner rejects prebuilt binaries in the source tree.
+
+## Committing and pushing so F-Droid actually detects the release
+
+`git push` alone is **not** a release. It pushes the current branch and **no tags**,
+and F-Droid never looks at `main`. Every version that failed to appear on F-Droid so
+far failed here.
+
+- **Push the tag explicitly.** `git push origin main vX.Y` (or `git push --follow-tags`).
+  A bare `git push` leaves the tag local-only and F-Droid sees nothing.
+- **Verify the tag reached the remote** before believing the release happened:
+  `git ls-remote --tags origin` must list the new `vX.Y`. Local `git tag -l` proves
+  nothing — it lists tags that were never pushed.
+- **A tag without a GitHub release is still broken.** The recipe's `Binaries:` URL
+  (`releases/download/v%v/maCat-%v.apk`) 404s until the release exists with the asset
+  named exactly `maCat-<versionName>.apk`. Confirm with `gh release view vX.Y`.
+- **Never let `main` and a tag declare the same `versionCode`/`versionName`.** If you
+  commit features to `main` after tagging, the very next release commit must bump the
+  version. Two different trees claiming one version is how feature work ends up with
+  nowhere to ship.
+- **Feature commits on `main` are free** — they change nothing on F-Droid. Only the
+  tag + GitHub release pair does. So never assume "I pushed, it's out".
+
+**Post-release verification** (all four, in order):
+
+1. `git ls-remote --tags origin` lists `vX.Y`.
+2. `gh release view vX.Y` shows `maCat-<versionName>.apk` attached.
+3. Within ~a day, F-Droid's checkupdates bot bumps `CurrentVersion` in the fdroiddata
+   recipe. Until it runs, the app is *absent* from
+   https://monitor.f-droid.org/builds/needsupdate — and absence there means F-Droid
+   detected no new version at all, i.e. steps 1–2 were skipped or failed.
+4. The build then has to come out byte-identical to the attached APK, or it is
+   rejected silently. Check https://monitor.f-droid.org/builds if a version stalls.
 
 ## Hard constraints — do not break these
 
