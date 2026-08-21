@@ -1,0 +1,1 @@
+Find things again: filter by colour, search, sort, shuffle and mark favourites. Adds a colour census of your wardrobe, custom categories you can add, rename and reorder, grid multi-select for bulk delete and recategorise, and a Recently Deleted bin so a mistaken delete is always undoable.
