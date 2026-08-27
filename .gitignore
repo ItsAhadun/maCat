@@ -28,3 +28,5 @@ keystore.properties
 # real wardrobe photos kept for testing colour detection by hand — big, personal,
 # and nothing the app needs to build
 /real examples/
+# scratch output from the Playwright MCP tooling
+/.playwright-mcp/
