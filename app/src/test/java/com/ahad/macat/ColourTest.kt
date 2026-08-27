@@ -4,7 +4,6 @@ import com.ahad.macat.data.Colour
 import com.ahad.macat.data.Item
 import com.ahad.macat.data.autoName
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ColourTest {
@@ -39,22 +38,91 @@ class ColourTest {
   }
 
   @Test
-  fun `a real colour outvotes a pale background`() {
-    // A pink item on a cream floor: a quarter of the frame is enough.
-    val pixels = IntArray(100) { if (it < 30) rgb(236, 127, 166) else rgb(230, 220, 200) }
-    assertEquals(Colour.PINK, Colour.dominant(pixels))
+  fun `the backdrop is struck off even when it fills most of the crop`() {
+    // A pink shoe on a cream floor: the floor still wins the crop by pixel count, but the border
+    // says what the floor is, so the shoe's own colour is the only tag left.
+    val cream = rgb(230, 220, 200)
+    val crop = IntArray(100) { if (it < 30) rgb(236, 127, 166) else cream }
+    assertEquals(listOf(Colour.PINK), Colour.tags(crop, IntArray(40) { cream }))
   }
 
   @Test
-  fun `a plain majority wins when nothing chromatic stands out`() {
-    // A black shoe on a dark floor, with a few stray colourful pixels.
-    val pixels = IntArray(100) { if (it < 5) rgb(211, 47, 47) else rgb(20, 20, 22) }
-    assertEquals(Colour.BLACK, Colour.dominant(pixels))
+  fun `an item that really is the backdrop colour keeps it`() {
+    // A black shoe on a dark floor: striking off black would leave the item with no colour at
+    // all, which is the worse answer, so the plain winner stands.
+    val dark = rgb(20, 20, 22)
+    val crop = IntArray(100) { if (it < 5) rgb(211, 47, 47) else dark }
+    assertEquals(listOf(Colour.BLACK), Colour.tags(crop, IntArray(40) { dark }))
+  }
+
+  @Test
+  fun `a two-tone item comes back with both colours, most of it first`() {
+    // A red-and-white trainer on a grey floor.
+    val crop =
+      IntArray(100) {
+        when {
+          it < 55 -> rgb(245, 245, 245)
+          it < 90 -> rgb(211, 47, 47)
+          else -> rgb(158, 158, 158)
+        }
+      }
+    assertEquals(
+      listOf(Colour.WHITE, Colour.RED),
+      Colour.tags(crop, IntArray(40) { rgb(158, 158, 158) }),
+    )
+  }
+
+  @Test
+  fun `a colour too small a part of the item is not one of its colours`() {
+    // A blue shirt with a small yellow logo: the logo is not what the shirt is.
+    val crop = IntArray(100) { if (it < 8) rgb(242, 194, 0) else rgb(47, 111, 208) }
+    assertEquals(listOf(Colour.BLUE), Colour.tags(crop, IntArray(40) { rgb(245, 245, 245) }))
+  }
+
+  @Test
+  fun `a cool grey floor tile is grey, not blue`() {
+    // Found on real photos: grey tile, black patent and silver glitter were all coming back BLUE.
+    // A ratio-based saturation test calls (120, 124, 132) 9% saturated and lands it in the blue
+    // band; twelve points of channel spread is not a colour.
+    assertEquals(Colour.GREY, Colour.classify(120, 124, 132))
+    assertEquals(Colour.GREY, Colour.classify(150, 152, 160))
+    // A colour that really is blue, however washed out, still has to survive that.
+    assertEquals(Colour.BLUE, Colour.classify(90, 107, 133))
+  }
+
+  @Test
+  fun `an item keeps its own shade when the backdrop shares its colour family`() {
+    // A white shoe on a grey floor. Both are achromatic, so striking the backdrop off by *colour*
+    // would leave the shoe with nothing but noise — this is why the backdrop is removed pixel by
+    // pixel instead. The floor holds most of the crop and must still not win.
+    val floor = rgb(140, 140, 145)
+    val crop = IntArray(100) { if (it < 40) rgb(245, 245, 245) else floor }
+    assertEquals(listOf(Colour.WHITE), Colour.tags(crop, IntArray(40) { floor }))
+  }
+
+  @Test
+  fun `grey has to earn a tag, where a colour only has to show up`() {
+    // Grey, white and black are where every washed-out pixel lands, so they clear a higher bar.
+    // Here grey covers *more* of the item than green does and is still not one of its colours,
+    // because a third of an item being grey is shadow, while a fifth being green is a green item.
+    val backdrop = IntArray(40) { rgb(230, 220, 200) }
+    val shadowed =
+      IntArray(100) {
+        when {
+          it < 20 -> rgb(60, 154, 70)
+          it < 50 -> rgb(120, 122, 128)
+          else -> rgb(47, 111, 208)
+        }
+      }
+    assertEquals(listOf(Colour.BLUE, Colour.GREEN), Colour.tags(shadowed, backdrop))
+    // An item that really is grey still gets it, which is the point of a bar rather than a ban.
+    val mostlyGrey = IntArray(100) { if (it < 10) rgb(60, 154, 70) else rgb(120, 122, 128) }
+    assertEquals(listOf(Colour.GREY), Colour.tags(mostlyGrey, backdrop))
   }
 
   @Test
   fun `no pixels means no guess`() {
-    assertNull(Colour.dominant(IntArray(0)))
+    assertEquals(emptyList<Colour>(), Colour.tags(IntArray(0), IntArray(0)))
   }
 
   @Test
@@ -67,7 +135,14 @@ class ColourTest {
 
   @Test
   fun `display name falls back to the auto name only while the name is blank`() {
-    val item = Item(name = "", category = "Shoes", photoFileName = "a.jpg", colour = Colour.PINK)
+    val item =
+      Item(
+        name = "",
+        category = "Shoes",
+        photoFileName = "a.jpg",
+        colours = listOf(Colour.PINK, Colour.WHITE),
+      )
+    // The auto name uses the colour most of the item is, not every colour it carries.
     assertEquals("Pink shoes", item.displayName)
     assertEquals("Wedding heels", item.copy(name = "Wedding heels").displayName)
   }

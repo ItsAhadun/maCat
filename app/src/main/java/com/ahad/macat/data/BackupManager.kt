@@ -19,7 +19,8 @@ import org.json.JSONObject
  * name. Binned items are not exported.
  *
  * Both directions have to survive a version gap. Reading is additive: every field added since
- * format 2 is read through `opt*` with a fallback, so an older backup restores fine. Writing
+ * format 2 is read through `opt*` with a fallback, so an older backup restores fine — including
+ * format 3's single `colour` string, which format 4 replaced with a `colours` list. Writing
  * degrades on the other side, because a build that still had the fixed category enum skips items
  * whose category it cannot parse rather than failing the whole restore.
  */
@@ -57,7 +58,9 @@ class BackupManager(
               .put("category", item.category)
               .put("photoFileName", item.photoFileName)
               .put("createdAt", item.createdAt)
-          item.colour?.let { entry.put("colour", it.name) }
+          item.colours?.takeIf { it.isNotEmpty() }?.let { colours ->
+            entry.put("colours", JSONArray(colours.map { it.name }))
+          }
           item.isFavourite?.let { entry.put("isFavourite", it) }
           item.crop?.let {
             entry
@@ -130,11 +133,9 @@ class BackupManager(
         // hand-edited manifest. Create it rather than dropping the item.
         ensureCategory(category)
         // Colour and crop arrived in format 2; backups without them restore as untagged and
-        // uncropped rather than failing.
-        val colour =
-          obj.optString("colour").takeIf { it.isNotEmpty() }?.let {
-            runCatching { Colour.valueOf(it) }.getOrNull()
-          }
+        // uncropped rather than failing. Format 4 turned the one colour into a list, so a backup
+        // written before it carries a single "colour" string instead — read whichever is there.
+        val colours = readColours(obj)
         val crop =
           if (obj.has("cropLeft")) {
             CropRect(
@@ -152,7 +153,7 @@ class BackupManager(
               category = category,
               photoFileName = obj.getString("photoFileName"),
               createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
-              colour = colour,
+              colours = colours,
               isFavourite = if (obj.has("isFavourite")) obj.getBoolean("isFavourite") else null,
             )
             .withCrop(crop)
@@ -161,6 +162,18 @@ class BackupManager(
       }
       restored
     }
+
+  /** An item's colours from either shape of manifest: the format 4 list, or the older string. */
+  private fun readColours(obj: JSONObject): List<Colour> {
+    val list = obj.optJSONArray("colours")
+    if (list != null) {
+      return (0 until list.length()).mapNotNull { i -> parseColour(list.optString(i)) }
+    }
+    return listOfNotNull(parseColour(obj.optString("colour")))
+  }
+
+  private fun parseColour(name: String?): Colour? =
+    name?.takeIf { it.isNotEmpty() }?.let { runCatching { Colour.valueOf(it) }.getOrNull() }
 
   /** Adds the categories the backup has and this catalogue does not, matching on name. */
   private suspend fun mergeCategories(categories: JSONArray?) {
@@ -186,7 +199,7 @@ class BackupManager(
   }
 
   private companion object {
-    const val FORMAT_VERSION = 3
+    const val FORMAT_VERSION = 4
     const val MANIFEST = "manifest.json"
     const val PHOTOS_DIR = "photos"
   }

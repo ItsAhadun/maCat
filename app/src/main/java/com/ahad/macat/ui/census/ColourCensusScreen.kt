@@ -90,8 +90,9 @@ fun ColourCensusScreen(
       Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
+      // Tags, not items: an item with more than one colour is counted under each of them.
       Text(
-        "$total ${if (total == 1) "item" else "items"} carry a colour",
+        "$total colour ${if (total == 1) "tag" else "tags"} across your catalogue",
         style = MaterialTheme.typography.titleMedium,
       )
 

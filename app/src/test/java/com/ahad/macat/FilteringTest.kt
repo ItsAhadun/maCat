@@ -22,7 +22,7 @@ class FilteringTest {
   private fun item(
     name: String = "",
     category: String = "Clothes",
-    colour: Colour? = null,
+    colours: List<Colour> = emptyList(),
     favourite: Boolean? = null,
     createdAt: Long = nextId * 1000L,
   ) = Item(
@@ -31,15 +31,24 @@ class FilteringTest {
     category = category,
     photoFileName = "photo.jpg",
     createdAt = createdAt,
-    colour = colour,
+    colours = colours,
     isFavourite = favourite,
   )
 
   // The catalogue every test below narrows.
-  private val blackShoes = item(category = "Shoes", colour = Colour.BLACK, favourite = true)
-  private val pinkShoes = item(category = "Shoes", colour = Colour.PINK)
-  private val blackCoat = item(name = "Winter coat", category = "Outerwear", colour = Colour.BLACK)
-  private val blueShirt = item(name = "Work shirt", category = "Clothes", colour = Colour.BLUE, favourite = true)
+  private val blackShoes =
+    item(category = "Shoes", colours = listOf(Colour.BLACK), favourite = true)
+  // Two-tone, so it answers to both of its colours and is counted under both.
+  private val pinkShoes = item(category = "Shoes", colours = listOf(Colour.PINK, Colour.WHITE))
+  private val blackCoat =
+    item(name = "Winter coat", category = "Outerwear", colours = listOf(Colour.BLACK))
+  private val blueShirt =
+    item(
+      name = "Work shirt",
+      category = "Clothes",
+      colours = listOf(Colour.BLUE),
+      favourite = true,
+    )
   private val catalogue = listOf(blackShoes, pinkShoes, blackCoat, blueShirt)
 
   @Test
@@ -119,13 +128,14 @@ class FilteringTest {
 
   @Test
   fun `sorting by colour follows the palette and puts untagged items last`() {
-    val untagged = item(colour = null)
+    val untagged = item(colours = emptyList())
     val sorted = (catalogue + untagged).filterAndSort(FilterState(sort = SortOrder.COLOUR))
-    // The palette runs dark to light and then through the hues, so PINK comes before BLUE.
-    // Untagged items have no place in it and collect at the end.
+    // The palette runs dark to light and then through the hues, so PINK comes before BLUE. An
+    // item sorts under the colour most of it is — the pink-and-white shoes sort as pink, not as
+    // white. Untagged items have no place in the palette and collect at the end.
     assertEquals(
       listOf(Colour.BLACK, Colour.BLACK, Colour.PINK, Colour.BLUE, null),
-      sorted.map { it.colour },
+      sorted.map { it.colours?.firstOrNull() },
     )
   }
 
@@ -157,18 +167,31 @@ class FilteringTest {
 
   @Test
   fun `the swatch row offers only colours the catalogue holds, in palette order`() {
-    assertEquals(listOf(Colour.BLACK, Colour.PINK, Colour.BLUE).sortedBy { it.ordinal },
-      catalogue.coloursPresent())
+    // White is there only as the pink shoes' second colour, and that is enough to offer it.
+    assertEquals(
+      listOf(Colour.BLACK, Colour.WHITE, Colour.PINK, Colour.BLUE).sortedBy { it.ordinal },
+      catalogue.coloursPresent(),
+    )
     assertTrue(Colour.GOLD !in catalogue.coloursPresent())
   }
 
   @Test
   fun `the census counts each colour and skips the ones nobody owns`() {
+    // Counts are of tags, not items: the pink-and-white shoes are counted under both colours.
     val counts = catalogue.colourCounts().toMap()
     assertEquals(2, counts[Colour.BLACK])
     assertEquals(1, counts[Colour.PINK])
+    assertEquals(1, counts[Colour.WHITE])
     assertEquals(1, counts[Colour.BLUE])
     assertEquals(null, counts[Colour.GREEN])
+  }
+
+  @Test
+  fun `an item answers to every colour it carries, not just its first`() {
+    val white = catalogue.filterAndSort(FilterState(colour = Colour.WHITE))
+    assertEquals(listOf(pinkShoes.id), white.map { it.id })
+    val pink = catalogue.filterAndSort(FilterState(colour = Colour.PINK))
+    assertEquals(listOf(pinkShoes.id), pink.map { it.id })
   }
 
   @Test

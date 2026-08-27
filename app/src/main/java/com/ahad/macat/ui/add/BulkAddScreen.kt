@@ -59,7 +59,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
-import com.ahad.macat.data.autoName
 import com.ahad.macat.ui.CatalogueViewModel
 import com.ahad.macat.ui.croppedPhotoModel
 
@@ -255,27 +254,30 @@ private fun AnnotateStep(
           OutlinedButton(onClick = { framingPage = page }, modifier = Modifier.fillMaxWidth()) {
             Text(if (entry.crop != null) "Change framing" else "Adjust framing")
           }
+          // The name the item would be saved under is *in* the field rather than captioned
+          // underneath it, so correcting it is one tap instead of retyping it from scratch.
           OutlinedTextField(
             value = entry.name,
-            onValueChange = { viewModel.bulkUpdateEntry(page, entry.copy(name = it)) },
-            label = { Text("Name (optional)") },
-            supportingText = {
-              if (entry.name.isBlank()) {
-                Text("Saved as “${autoName(entry.colour, entry.category)}”")
-              }
-            },
+            onValueChange = { viewModel.bulkSetName(page, it) },
+            label = { Text("Name") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
           )
           CategorySelector(
             categories = categories,
             selected = entry.category,
-            onSelect = { viewModel.bulkUpdateEntry(page, entry.copy(category = it)) },
+            onSelect = { viewModel.bulkSetCategory(page, it) },
             modifier = Modifier.fillMaxWidth(),
           )
           ColourSelector(
-            selected = entry.colour,
-            onSelect = { viewModel.bulkUpdateEntry(page, entry.copy(colour = it)) },
+            selected = entry.colours,
+            onToggle = { picked ->
+              val colours = entry.colours
+              viewModel.bulkSetColours(
+                page,
+                if (picked in colours) colours - picked else colours + picked,
+              )
+            },
             modifier = Modifier.align(Alignment.Start),
           )
           TextButton(onClick = { viewModel.bulkRemoveEntry(page) }) { Text("Remove this photo") }

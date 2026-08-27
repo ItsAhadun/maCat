@@ -80,7 +80,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.withStateAtLeast
 import coil3.compose.AsyncImage
 import com.ahad.macat.data.Category
-import com.ahad.macat.data.Colour
 import com.ahad.macat.data.FilterState
 import com.ahad.macat.data.FilterVisibility
 import com.ahad.macat.data.Item
@@ -110,7 +109,6 @@ fun FeedScreen(
   val filterState by viewModel.filterState.collectAsStateWithLifecycle()
   val visibility by viewModel.filterVisibility.collectAsStateWithLifecycle()
   val categories by viewModel.categories.collectAsStateWithLifecycle()
-  val colours by viewModel.availableColours.collectAsStateWithLifecycle()
 
   val context = LocalContext.current
   // Photos fill the window here, so a framed one has to decode at least that big.
@@ -247,9 +245,7 @@ fun FeedScreen(
         state = filterState,
         visibility = visibility,
         categories = categories,
-        colours = colours,
         onCategory = viewModel::setCategoryFilter,
-        onColour = viewModel::setColourFilter,
         onToggleFavourites = viewModel::toggleFavouritesOnly,
         onSort = viewModel::setSort,
         onOpenGrid = onOpenGrid,
@@ -374,7 +370,9 @@ private fun ItemPage(
           Column(Modifier.weight(1f)) {
             Text(
               text =
-                listOfNotNull(item.category, item.colour?.label).joinToString(" · ").uppercase(),
+                (listOf(item.category) + item.colours.orEmpty().map { it.label })
+                  .joinToString(" · ")
+                  .uppercase(),
               color = Color.White.copy(alpha = 0.7f),
               style = MaterialTheme.typography.labelLarge,
             )
@@ -493,9 +491,7 @@ private fun TopOverlay(
   state: FilterState,
   visibility: FilterVisibility,
   categories: List<Category>,
-  colours: List<Colour>,
   onCategory: (String?) -> Unit,
-  onColour: (Colour?) -> Unit,
   onToggleFavourites: () -> Unit,
   onSort: (SortOrder) -> Unit,
   onOpenGrid: () -> Unit,
@@ -584,13 +580,16 @@ private fun TopOverlay(
       }
     }
 
+    // No swatch row here. The feed's chrome sits on top of the photo, and a second scrolling
+    // row of dots under the chips was more clutter than the photo could carry. Filtering by
+    // colour lives on the grid and in the census, both of which have a surface to put it on.
     FilterBar(
-      visibility = visibility,
+      visibility = visibility.copy(colours = false),
       state = state,
       categories = categories,
-      colours = colours,
+      colours = emptyList(),
       onCategory = onCategory,
-      onColour = onColour,
+      onColour = {},
       onToggleFavourites = onToggleFavourites,
       onDark = true,
       modifier = Modifier.fillMaxWidth(),

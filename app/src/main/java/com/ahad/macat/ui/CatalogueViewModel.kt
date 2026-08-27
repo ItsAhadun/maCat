@@ -15,6 +15,7 @@ import com.ahad.macat.data.Item
 import com.ahad.macat.data.ItemRepository
 import com.ahad.macat.data.SettingsStore
 import com.ahad.macat.data.SortOrder
+import com.ahad.macat.data.autoName
 import com.ahad.macat.data.colourCounts
 import com.ahad.macat.data.coloursPresent
 import com.ahad.macat.data.filterAndSort
@@ -37,8 +38,19 @@ data class BulkEntry(
   val photoUri: Uri,
   val name: String = "",
   val category: String,
-  val colour: Colour? = null,
+  val colours: List<Colour> = emptyList(),
   val crop: CropRect? = null,
+  /**
+   * False once the user types a name of their own. Until then [name] holds the auto name and
+   * follows the colours and the category, so the field can show it as editable text instead of
+   * as a caption underneath saying what would be saved.
+   */
+  val nameIsAuto: Boolean = true,
+  /**
+   * False until the user files this photo themselves. Untouched entries follow whatever category
+   * was last picked — see [bulkSetCategory].
+   */
+  val categoryChosen: Boolean = false,
 )
 
 /**
@@ -167,11 +179,17 @@ class CatalogueViewModel(
 
   fun newCaptureFile(): File = repository.newCaptureFile()
 
-  /** The colour tag guessed from a photo, for the auto name and the colour chip. */
-  suspend fun detectColour(uri: Uri): Colour? = repository.detectColour(uri)
+  /** The colour tags guessed from a photo, for the auto name and the colour chips. */
+  suspend fun detectColours(uri: Uri): List<Colour> = repository.detectColours(uri)
 
-  fun addItem(name: String, category: String, photoUri: Uri, colour: Colour?, crop: CropRect?) {
-    viewModelScope.launch { repository.addItem(name, category, photoUri, colour, crop) }
+  fun addItem(
+    name: String,
+    category: String,
+    photoUri: Uri,
+    colours: List<Colour>,
+    crop: CropRect?,
+  ) {
+    viewModelScope.launch { repository.addItem(name, category, photoUri, colours, crop) }
   }
 
   fun updateItem(
@@ -179,11 +197,11 @@ class CatalogueViewModel(
     name: String,
     category: String,
     newPhotoUri: Uri?,
-    colour: Colour?,
+    colours: List<Colour>,
     crop: CropRect?,
   ) {
     viewModelScope.launch {
-      repository.updateItem(item, name, category, newPhotoUri, colour, crop)
+      repository.updateItem(item, name, category, newPhotoUri, colours, crop)
     }
   }
 
@@ -317,18 +335,54 @@ class CatalogueViewModel(
   val bulkEntries = mutableStateListOf<BulkEntry>()
 
   fun bulkAddPhoto(uri: Uri) {
-    bulkEntries.add(BulkEntry(photoUri = uri, category = defaultCategory))
+    val category = defaultCategory
+    bulkEntries.add(
+      BulkEntry(photoUri = uri, name = autoName(null, category), category = category)
+    )
     // Tag it in the background so the details step already has colours and auto names waiting.
     viewModelScope.launch {
-      val colour = repository.detectColour(uri) ?: return@launch
-      val index = bulkEntries.indexOfFirst { it.photoUri == uri && it.colour == null }
-      if (index >= 0) bulkEntries[index] = bulkEntries[index].copy(colour = colour)
+      val colours = repository.detectColours(uri).ifEmpty { return@launch }
+      val index = bulkEntries.indexOfFirst { it.photoUri == uri && it.colours.isEmpty() }
+      if (index >= 0) bulkEntries[index] = bulkEntries[index].copy(colours = colours).autoNamed()
     }
   }
 
   fun bulkUpdateEntry(index: Int, entry: BulkEntry) {
     if (index in bulkEntries.indices) bulkEntries[index] = entry
   }
+
+  /** A typed name is the user's; it stops following the colours and the category from here on. */
+  fun bulkSetName(index: Int, name: String) {
+    val entry = bulkEntries.getOrNull(index) ?: return
+    bulkEntries[index] = entry.copy(name = name, nameIsAuto = false)
+  }
+
+  fun bulkSetColours(index: Int, colours: List<Colour>) {
+    val entry = bulkEntries.getOrNull(index) ?: return
+    bulkEntries[index] = entry.copy(colours = colours).autoNamed()
+  }
+
+  /**
+   * Files one photo under [category] — and every photo the user has not filed themselves along
+   * with it.
+   *
+   * A batch is almost always one kind of thing: twelve photos of shoes should not cost twelve
+   * taps on the same chip. Entries the user has picked a category for are left alone, so a batch
+   * that really is mixed still ends up right.
+   */
+  fun bulkSetCategory(index: Int, category: String) {
+    if (index !in bulkEntries.indices) return
+    bulkEntries.forEachIndexed { i, entry ->
+      if (i != index && entry.categoryChosen) return@forEachIndexed
+      bulkEntries[i] =
+        entry.copy(category = category, categoryChosen = entry.categoryChosen || i == index)
+          .autoNamed()
+    }
+  }
+
+  /** Keeps the prefilled name in step with the entry, until the user types one of their own. */
+  private fun BulkEntry.autoNamed(): BulkEntry =
+    if (nameIsAuto) copy(name = autoName(colours.firstOrNull(), category)) else this
 
   fun bulkRemoveEntry(index: Int) {
     if (index in bulkEntries.indices) bulkEntries.removeAt(index)
@@ -343,7 +397,10 @@ class CatalogueViewModel(
     bulkClear()
     viewModelScope.launch {
       entries.forEach {
-        repository.addItem(it.name.trim(), it.category, it.photoUri, it.colour, it.crop)
+        // An untouched name is saved blank, not as the text the field was showing: a blank name
+        // is still computed at display time, so the item follows a later category rename.
+        val name = if (it.nameIsAuto) "" else it.name.trim()
+        repository.addItem(name, it.category, it.photoUri, it.colours, it.crop)
       }
     }
   }

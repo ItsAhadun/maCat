@@ -1,5 +1,6 @@
 package com.ahad.macat.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -11,7 +12,13 @@ data class Item(
   val category: String,
   val photoFileName: String,
   val createdAt: Long = System.currentTimeMillis(),
-  val colour: Colour? = null,
+  /**
+   * The item's colours, most of the item first. Null and empty both mean untagged.
+   *
+   * Kept in the `colour` column an item has had since v2 — see [ColourListConverter] for why that
+   * is what makes this a schema change nobody has to migrate through.
+   */
+  @ColumnInfo(name = "colour") val colours: List<Colour>? = null,
   // The chosen framing, split into columns Room can store. Read it through [crop].
   val cropLeft: Float? = null,
   val cropTop: Float? = null,
@@ -24,7 +31,7 @@ data class Item(
 ) {
   /** What the screens show: the name that was typed, or one made from the photo's colour. */
   val displayName: String
-    get() = name.ifBlank { autoName(colour, category) }
+    get() = name.ifBlank { autoName(colours?.firstOrNull(), category) }
 
   /** The part of the photo to show, or null to show all of it. */
   val crop: CropRect?

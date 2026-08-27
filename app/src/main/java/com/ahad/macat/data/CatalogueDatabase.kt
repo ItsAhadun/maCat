@@ -2,10 +2,16 @@ package com.ahad.macat.data
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/**
+ * The schema is still v3: an item's colours are a list now, but they are stored in the TEXT
+ * column a single colour already used, so no table changed shape. See [ColourListConverter].
+ */
 @Database(entities = [Item::class, Category::class], version = 3, exportSchema = false)
+@TypeConverters(ColourListConverter::class)
 abstract class CatalogueDatabase : RoomDatabase() {
   abstract fun itemDao(): ItemDao
 

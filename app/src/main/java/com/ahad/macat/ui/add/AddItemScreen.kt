@@ -62,6 +62,7 @@ import com.ahad.macat.data.autoName
 import com.ahad.macat.ui.CatalogueViewModel
 import com.ahad.macat.ui.components.ColourPickerGrid
 import com.ahad.macat.ui.components.Swatch
+import com.ahad.macat.ui.components.SwatchRow
 import com.ahad.macat.ui.croppedPhotoModel
 
 /**
@@ -85,8 +86,11 @@ fun AddItemScreen(viewModel: CatalogueViewModel, itemId: Long?, onDone: () -> Un
   var category by rememberSaveable {
     mutableStateOf(editingItem?.category ?: viewModel.defaultCategory)
   }
-  var colour by rememberSaveable { mutableStateOf(editingItem?.colour) }
-  // Once the colour has been set by hand, detection stops overruling it.
+  var colours by
+    rememberSaveable(stateSaver = ColourListSaver) {
+      mutableStateOf(editingItem?.colours.orEmpty())
+    }
+  // Once the colours have been set by hand, detection stops overruling them.
   var colourPicked by rememberSaveable { mutableStateOf(false) }
   // Newly taken/picked photo; null while editing means "keep the current photo".
   var photoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
@@ -110,9 +114,11 @@ fun AddItemScreen(viewModel: CatalogueViewModel, itemId: Long?, onDone: () -> Un
     if (colourPicked) return@LaunchedEffect
     val source =
       photoUri
-        ?: editingItem?.takeIf { it.colour == null }?.let { Uri.fromFile(viewModel.photoFile(it)) }
+        ?: editingItem
+          ?.takeIf { it.colours.isNullOrEmpty() }
+          ?.let { Uri.fromFile(viewModel.photoFile(it)) }
         ?: return@LaunchedEffect
-    colour = viewModel.detectColour(source)
+    colours = viewModel.detectColours(source)
   }
 
   if (showCamera) {
@@ -213,7 +219,9 @@ fun AddItemScreen(viewModel: CatalogueViewModel, itemId: Long?, onDone: () -> Un
           label = { Text("Name (optional)") },
           // The placeholder only shows while the field has focus, so the auto name goes here
           // instead: it is the whole point of leaving the name empty.
-          supportingText = { if (name.isBlank()) Text("Saved as “${autoName(colour, category)}”") },
+          supportingText = {
+            if (name.isBlank()) Text("Saved as “${autoName(colours.firstOrNull(), category)}”")
+          },
           singleLine = true,
           modifier = Modifier.fillMaxWidth(),
         )
@@ -226,9 +234,9 @@ fun AddItemScreen(viewModel: CatalogueViewModel, itemId: Long?, onDone: () -> Un
         )
 
         ColourSelector(
-          selected = colour,
-          onSelect = {
-            colour = it
+          selected = colours,
+          onToggle = { picked ->
+            colours = if (picked in colours) colours - picked else colours + picked
             colourPicked = true
           },
           modifier = Modifier.align(Alignment.Start),
@@ -239,9 +247,9 @@ fun AddItemScreen(viewModel: CatalogueViewModel, itemId: Long?, onDone: () -> Un
             haptics.performHapticFeedback(HapticFeedbackType.Confirm)
             val editing = editingItem
             if (editing != null) {
-              viewModel.updateItem(editing, name.trim(), category, photoUri, colour, crop)
+              viewModel.updateItem(editing, name.trim(), category, photoUri, colours, crop)
             } else {
-              viewModel.addItem(name.trim(), category, photoUri!!, colour, crop)
+              viewModel.addItem(name.trim(), category, photoUri!!, colours, crop)
             }
             onDone()
           },
@@ -284,24 +292,29 @@ fun CategorySelector(
   }
 }
 
-/** The colour tag, guessed from the photo and correctable here when the guess is off. */
+/**
+ * The colour tags, guessed from the photo and correctable here when the guess is off.
+ *
+ * The menu stays open as colours are tapped: an item can have several, and closing after the
+ * first would make picking the second a second trip.
+ */
 @Composable
-fun ColourSelector(selected: Colour?, onSelect: (Colour) -> Unit, modifier: Modifier = Modifier) {
+fun ColourSelector(
+  selected: List<Colour>,
+  onToggle: (Colour) -> Unit,
+  modifier: Modifier = Modifier,
+) {
   var open by rememberSaveable { mutableStateOf(false) }
   Box(modifier) {
     AssistChip(
       onClick = { open = true },
-      label = { Text(selected?.label ?: "Add colour") },
-      leadingIcon = { Swatch(selected) },
+      label = {
+        Text(if (selected.isEmpty()) "Add colours" else selected.joinToString { it.label })
+      },
+      leadingIcon = { if (selected.isEmpty()) Swatch(null) else SwatchRow(selected) },
     )
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-      ColourPickerGrid(
-        selected = selected,
-        onSelect = {
-          onSelect(it)
-          open = false
-        },
-      )
+      ColourPickerGrid(selected = selected, onToggle = onToggle, onDone = { open = false })
     }
   }
 }
@@ -319,6 +332,13 @@ fun feedAspectRatio(): Float {
     9f / 19.5f
   }
 }
+
+/** Enums are not [android.os.Bundle] material on their own; their names are. */
+private val ColourListSaver =
+  listSaver<List<Colour>, String>(
+    save = { colours -> colours.map { it.name } },
+    restore = { names -> names.map { Colour.valueOf(it) } },
+  )
 
 private val CropRectSaver =
   listSaver<CropRect?, Float>(

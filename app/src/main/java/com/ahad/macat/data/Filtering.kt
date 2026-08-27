@@ -46,7 +46,7 @@ fun List<Item>.filterAndSort(state: FilterState): List<Item> {
   val matches =
     filter { item ->
       (state.category == null || item.category == state.category) &&
-        (state.colour == null || item.colour == state.colour) &&
+        (state.colour == null || state.colour in item.colours.orEmpty()) &&
         (!state.favouritesOnly || item.favourite) &&
         (query.isEmpty() || item.displayName.contains(query, ignoreCase = true))
     }
@@ -55,10 +55,12 @@ fun List<Item>.filterAndSort(state: FilterState): List<Item> {
       matches.sortedWith(compareByDescending<Item> { it.createdAt }.thenByDescending { it.id })
     SortOrder.OLDEST -> matches.sortedWith(compareBy<Item> { it.createdAt }.thenBy { it.id })
     // Palette order, which runs dark to light and then through the hues, so the result reads as
-    // a gradient rather than an alphabet. Untagged items collect at the end.
+    // a gradient rather than an alphabet. An item sorts under the colour most of it is — the
+    // first of its tags. Untagged items collect at the end.
     SortOrder.COLOUR ->
       matches.sortedWith(
-        compareBy<Item> { it.colour?.ordinal ?: Int.MAX_VALUE }.thenByDescending { it.createdAt }
+        compareBy<Item> { it.colours?.firstOrNull()?.ordinal ?: Int.MAX_VALUE }
+          .thenByDescending { it.createdAt }
       )
     SortOrder.SHUFFLE -> matches.shuffled(Random(state.shuffleSeed))
   }
@@ -66,13 +68,18 @@ fun List<Item>.filterAndSort(state: FilterState): List<Item> {
 
 /** The colours the catalogue actually contains, in palette order — the swatch row's contents. */
 fun List<Item>.coloursPresent(): List<Colour> {
-  val present = mapNotNullTo(HashSet()) { it.colour }
+  val present = flatMapTo(HashSet()) { it.colours.orEmpty() }
   return Colour.entries.filter { it in present }
 }
 
-/** How many items carry each colour, for the census bar. Palette order, empties dropped. */
+/**
+ * How many items carry each colour, for the census bar. Palette order, empties dropped.
+ *
+ * An item with more than one colour is counted under each of them, so these add up to more than
+ * the size of the catalogue — the census counts tags, not items, and says so.
+ */
 fun List<Item>.colourCounts(): List<Pair<Colour, Int>> {
-  val counts = groupingBy { it.colour }.eachCount()
+  val counts = flatMap { it.colours.orEmpty() }.groupingBy { it }.eachCount()
   return Colour.entries.mapNotNull { colour ->
     val count = counts[colour] ?: return@mapNotNull null
     colour to count

@@ -25,18 +25,18 @@ class ItemRepository(
 
   fun photoFile(item: Item): File = photoStore.file(item.photoFileName)
 
-  suspend fun detectColour(uri: Uri): Colour? = colourDetector.detect(uri)
+  suspend fun detectColours(uri: Uri): List<Colour> = colourDetector.detect(uri)
 
   suspend fun addItem(
     name: String,
     category: String,
     photoUri: Uri,
-    colour: Colour?,
+    colours: List<Colour>,
     crop: CropRect?,
   ) {
     val fileName = photoStore.import(photoUri)
     dao.insert(
-      Item(name = name, category = category, photoFileName = fileName, colour = colour)
+      Item(name = name, category = category, photoFileName = fileName, colours = colours)
         .withCrop(crop)
     )
   }
@@ -46,10 +46,10 @@ class ItemRepository(
     name: String,
     category: String,
     newPhotoUri: Uri?,
-    colour: Colour?,
+    colours: List<Colour>,
     crop: CropRect?,
   ) {
-    val updated = item.copy(name = name, category = category, colour = colour).withCrop(crop)
+    val updated = item.copy(name = name, category = category, colours = colours).withCrop(crop)
     if (newPhotoUri != null) {
       val fileName = photoStore.import(newPhotoUri)
       dao.update(updated.copy(photoFileName = fileName))
