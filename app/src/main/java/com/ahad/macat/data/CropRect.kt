@@ -15,8 +15,78 @@ data class CropRect(val left: Float, val top: Float, val right: Float, val botto
     get() = bottom - top
 }
 
+/** Smallest a split box can be dragged, as a share of the photo — smaller cannot be grabbed again. */
+const val MIN_BOX = 0.05f
+
+/** Slides the box, keeping its size — one pushed against an edge stops rather than shrinking. */
+fun CropRect.movedBy(dx: Float, dy: Float): CropRect {
+  val x = (left + dx).coerceIn(0f, 1f - width)
+  val y = (top + dy).coerceIn(0f, 1f - height)
+  return CropRect(x, y, x + width, y + height)
+}
+
+/**
+ * Moves one corner, keeping the box the right way round and no smaller than [MIN_BOX].
+ *
+ * Both ends of each clamp are held apart deliberately: a detected box can arrive narrower than
+ * [MIN_BOX] — a thin sliver of a strap does — and `coerceIn(0f, right - MIN_BOX)` throws the moment
+ * its top bound goes negative.
+ */
+fun CropRect.resizedBy(
+  dLeft: Float = 0f,
+  dTop: Float = 0f,
+  dRight: Float = 0f,
+  dBottom: Float = 0f,
+): CropRect =
+  CropRect(
+    left = (left + dLeft).coerceIn(0f, (right - MIN_BOX).coerceAtLeast(0f)),
+    top = (top + dTop).coerceIn(0f, (bottom - MIN_BOX).coerceAtLeast(0f)),
+    right = (right + dRight).coerceIn((left + MIN_BOX).coerceAtMost(1f), 1f),
+    bottom = (bottom + dBottom).coerceIn((top + MIN_BOX).coerceAtMost(1f), 1f),
+  )
+
 /** A photo's zoom (1 = fills the frame) and its pan in frame pixels, as the editor holds it. */
 data class ZoomPan(val zoom: Float, val panX: Float, val panY: Float)
+
+/**
+ * Grows this rect outwards until the region it picks out of a [imageWidth] x [imageHeight] photo is
+ * [targetAspect] (width / height) shaped, staying inside the photo.
+ *
+ * Used when a photo is split into one item per box: the boxes are drawn tight around the items, but
+ * the feed shows every photo at its own shape with `ContentScale.Crop`, so a tight box round a
+ * sandal lying sideways would have its ends chopped off on display. Growing it here — outwards
+ * only, so nothing the user drew is ever cut into — costs a little backdrop around the item and
+ * keeps the whole of it on screen. A photo too small to reach the aspect simply gives all it has.
+ */
+fun CropRect.expandedToAspect(targetAspect: Float, imageWidth: Int, imageHeight: Int): CropRect {
+  if (targetAspect <= 0f || imageWidth <= 0 || imageHeight <= 0) return this
+  val currentWidth = width * imageWidth
+  val currentHeight = height * imageHeight
+  if (currentWidth <= 0f || currentHeight <= 0f) return this
+
+  var grownWidth = currentWidth
+  var grownHeight = currentHeight
+  if (currentWidth / currentHeight < targetAspect) {
+    grownWidth = currentHeight * targetAspect
+  } else {
+    grownHeight = currentWidth / targetAspect
+  }
+  grownWidth = grownWidth.coerceAtMost(imageWidth.toFloat())
+  grownHeight = grownHeight.coerceAtMost(imageHeight.toFloat())
+
+  // Grow about the middle, then slide back inside the photo. Sliding rather than shrinking is what
+  // keeps the original rect covered when it was already up against an edge.
+  val centreX = (left + right) / 2f * imageWidth
+  val centreY = (top + bottom) / 2f * imageHeight
+  val x = (centreX - grownWidth / 2f).coerceIn(0f, imageWidth - grownWidth)
+  val y = (centreY - grownHeight / 2f).coerceIn(0f, imageHeight - grownHeight)
+  return CropRect(
+    left = x / imageWidth,
+    top = y / imageHeight,
+    right = (x + grownWidth) / imageWidth,
+    bottom = (y + grownHeight) / imageHeight,
+  )
+}
 
 /**
  * The scale at which an [imageWidth] x [imageHeight] photo just covers a

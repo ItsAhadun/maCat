@@ -13,6 +13,7 @@ class ItemRepository(
   private val db: CatalogueDatabase,
   private val photoStore: PhotoStore,
   private val colourDetector: ColourDetector,
+  private val itemSegmenter: ItemSegmenter,
 ) {
   private val dao = db.itemDao()
   private val categoryDao = db.categoryDao()
@@ -26,6 +27,13 @@ class ItemRepository(
   fun photoFile(item: Item): File = photoStore.file(item.photoFileName)
 
   suspend fun detectColours(uri: Uri): List<Colour> = colourDetector.detect(uri)
+
+  /** The separate items a photo looks like it holds; fewer than two means leave it alone. */
+  suspend fun segments(uri: Uri): List<CropRect> = itemSegmenter.detect(uri)
+
+  /** Cuts one photo into a photo per region, ready to be added as items in their own right. */
+  suspend fun splitPhoto(uri: Uri, regions: List<CropRect>, aspectRatio: Float): List<Uri> =
+    photoStore.writeCrops(uri, regions, aspectRatio)
 
   suspend fun addItem(
     name: String,

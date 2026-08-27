@@ -2,7 +2,6 @@ package com.ahad.macat.data
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,27 +19,15 @@ class ColourDetector(private val context: Context) {
   /** Empty when the photo can't be read; the caller just goes without tags. */
   suspend fun detect(uri: Uri): List<Colour> =
     withContext(Dispatchers.IO) {
-      val bitmap = runCatching { decodeSmall(uri) }.getOrNull() ?: return@withContext emptyList()
+      val bitmap =
+        runCatching { decodeUpright(context, uri, SAMPLE_PX) }.getOrNull()
+          ?: return@withContext emptyList()
       try {
         Colour.tags(item = centrePixels(bitmap), backdrop = borderPixels(bitmap))
       } finally {
         bitmap.recycle()
       }
     }
-
-  private fun decodeSmall(uri: Uri): Bitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-    val longestSide = maxOf(bounds.outWidth, bounds.outHeight)
-    if (longestSide <= 0) return null
-    val options =
-      BitmapFactory.Options().apply {
-        inSampleSize = Integer.highestOneBit(longestSide / SAMPLE_PX).coerceAtLeast(1)
-      }
-    return context.contentResolver.openInputStream(uri)?.use {
-      BitmapFactory.decodeStream(it, null, options)
-    }
-  }
 
   /** The middle of the frame: the item, plus as little of what it is lying on as possible. */
   private fun centrePixels(bitmap: Bitmap): IntArray {

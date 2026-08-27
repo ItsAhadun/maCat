@@ -68,6 +68,7 @@ import com.ahad.macat.ui.croppedPhotoModel
 fun BulkAddScreen(viewModel: CatalogueViewModel, onDone: () -> Unit) {
   var step by rememberSaveable { mutableIntStateOf(0) }
   var showCamera by rememberSaveable { mutableStateOf(false) }
+  var manualSplitId by rememberSaveable { mutableStateOf<Long?>(null) }
   val entries = viewModel.bulkEntries
 
   // All photos were removed in the annotate step — go back to capturing.
@@ -90,6 +91,27 @@ fun BulkAddScreen(viewModel: CatalogueViewModel, onDone: () -> Unit) {
       onPhotoCaptured = viewModel::bulkAddPhoto,
       onClose = { showCamera = false },
       captureCount = entries.size,
+    )
+    return
+  }
+
+  // A photo that looks like several things is asked about before anything else is done with it, and
+  // any photo at all can be opened by hand from the grid — for the ones the detector ran together.
+  val splitEntry =
+    manualSplitId?.let { id -> entries.firstOrNull { it.id == id } } ?: viewModel.pendingSplitReview
+  if (step == 0 && splitEntry != null) {
+    val feedShape = feedAspectRatio()
+    SplitReviewScreen(
+      photo = splitEntry.photoUri,
+      initialBoxes = splitEntry.segments,
+      onSplit = { boxes ->
+        viewModel.bulkSplitEntry(splitEntry.id, boxes, feedShape)
+        manualSplitId = null
+      },
+      onKeepAsOne = {
+        viewModel.bulkKeepAsOne(splitEntry.id)
+        manualSplitId = null
+      },
     )
     return
   }
@@ -119,6 +141,7 @@ fun BulkAddScreen(viewModel: CatalogueViewModel, onDone: () -> Unit) {
           )
         },
         onNext = { step = 1 },
+        onSplitPhoto = { manualSplitId = it },
         modifier = Modifier.padding(padding),
       )
     } else {
@@ -140,6 +163,7 @@ private fun CaptureStep(
   onTakePhoto: () -> Unit,
   onPickPhotos: () -> Unit,
   onNext: () -> Unit,
+  onSplitPhoto: (Long) -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val entries = viewModel.bulkEntries
@@ -153,6 +177,11 @@ private fun CaptureStep(
         )
       }
     } else {
+      Text(
+        "Tap a photo if it holds more than one item.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
       LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 100.dp),
         modifier = Modifier.weight(1f),
@@ -165,7 +194,11 @@ private fun CaptureStep(
               model = entry.photoUri,
               contentDescription = "Photo ${index + 1}",
               contentScale = ContentScale.Crop,
-              modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp)),
+              modifier =
+                Modifier.fillMaxWidth()
+                  .aspectRatio(1f)
+                  .clip(RoundedCornerShape(12.dp))
+                  .clickable { onSplitPhoto(entry.id) },
             )
             FilledIconButton(
               onClick = { viewModel.bulkRemoveEntry(index) },

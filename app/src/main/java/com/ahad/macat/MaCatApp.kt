@@ -6,6 +6,7 @@ import com.ahad.macat.data.BackupManager
 import com.ahad.macat.data.CatalogueDatabase
 import com.ahad.macat.data.ColourDetector
 import com.ahad.macat.data.ItemRepository
+import com.ahad.macat.data.ItemSegmenter
 import com.ahad.macat.data.MIGRATION_1_2
 import com.ahad.macat.data.MIGRATION_2_3
 import com.ahad.macat.data.PhotoStore
@@ -24,7 +25,9 @@ class MaCatApp : Application() {
   }
   private val photoStore by lazy { PhotoStore(this) }
 
-  val repository: ItemRepository by lazy { ItemRepository(database, photoStore, ColourDetector(this)) }
+  val repository: ItemRepository by lazy {
+    ItemRepository(database, photoStore, ColourDetector(this), ItemSegmenter(this))
+  }
 
   val backupManager: BackupManager by lazy { BackupManager(this, database, photoStore) }
 

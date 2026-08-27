@@ -35,6 +35,12 @@ import kotlinx.coroutines.launch
 
 /** One photo collected in the bulk-add flow, plus the info the user types for it. */
 data class BulkEntry(
+  /**
+   * Identity that survives the list being rewritten. Splitting a photo replaces one entry with
+   * several, so background work started for a photo cannot come back and find its entry by
+   * position, nor by its Uri — the same gallery photo can be picked twice.
+   */
+  val id: Long,
   val photoUri: Uri,
   val name: String = "",
   val category: String,
@@ -51,6 +57,13 @@ data class BulkEntry(
    * was last picked — see [bulkSetCategory].
    */
   val categoryChosen: Boolean = false,
+  /**
+   * What the segmenter made of the photo. Two or more boxes means it looks like several items and
+   * the user has yet to be asked; see [CatalogueViewModel.pendingSplitReview].
+   */
+  val segments: List<CropRect> = emptyList(),
+  /** True once the user has answered the "is this several items?" question for this photo. */
+  val splitReviewed: Boolean = false,
 )
 
 /**
@@ -334,16 +347,80 @@ class CatalogueViewModel(
   // Bulk add state lives here so it survives configuration changes (fold/unfold, rotation).
   val bulkEntries = mutableStateListOf<BulkEntry>()
 
+  private var nextBulkId = 0L
+
   fun bulkAddPhoto(uri: Uri) {
     val category = defaultCategory
+    val id = nextBulkId++
     bulkEntries.add(
-      BulkEntry(photoUri = uri, name = autoName(null, category), category = category)
+      BulkEntry(id = id, photoUri = uri, name = autoName(null, category), category = category)
     )
     // Tag it in the background so the details step already has colours and auto names waiting.
     viewModelScope.launch {
       val colours = repository.detectColours(uri).ifEmpty { return@launch }
-      val index = bulkEntries.indexOfFirst { it.photoUri == uri && it.colours.isEmpty() }
-      if (index >= 0) bulkEntries[index] = bulkEntries[index].copy(colours = colours).autoNamed()
+      updateBulkEntry(id) { it.copy(colours = colours).autoNamed() }
+    }
+    // And look for more than one item in it, so a photo of the whole floor can be offered up as
+    // the several things it actually shows rather than filed as one.
+    viewModelScope.launch {
+      val segments = repository.segments(uri)
+      if (segments.size >= 2) updateBulkEntry(id) { it.copy(segments = segments) }
+    }
+  }
+
+  /** Entries are found by id, not position: a split rewrites the list under any work in flight. */
+  private fun updateBulkEntry(id: Long, change: (BulkEntry) -> BulkEntry) {
+    val index = bulkEntries.indexOfFirst { it.id == id }
+    if (index >= 0) bulkEntries[index] = change(bulkEntries[index])
+  }
+
+  /** The next photo that looks like several items and has not been asked about yet. */
+  val pendingSplitReview: BulkEntry?
+    get() = bulkEntries.firstOrNull { it.segments.size >= 2 && !it.splitReviewed }
+
+  /** "No, it is one item" — the photo is left exactly as it was, and is not asked about again. */
+  fun bulkKeepAsOne(id: Long) {
+    updateBulkEntry(id) { it.copy(splitReviewed = true) }
+  }
+
+  /**
+   * Replaces one photo with one photo per box, each cut out and added in the original's place.
+   *
+   * [aspectRatio] is the shape the feed shows photos at, so the cut-outs are grown to it and the
+   * items are not chopped at the sides on display. The children keep only the category: everything
+   * else is theirs to work out, and the colours are detected on the crop rather than inherited from
+   * a photo of six different things.
+   */
+  fun bulkSplitEntry(id: Long, regions: List<CropRect>, aspectRatio: Float) {
+    val entry = bulkEntries.firstOrNull { it.id == id } ?: return
+    if (regions.isEmpty()) return
+    // Answered up front: cutting the photo up takes long enough that the review would otherwise
+    // reopen on the very entry being split.
+    updateBulkEntry(id) { it.copy(splitReviewed = true) }
+    viewModelScope.launch {
+      val uris = repository.splitPhoto(entry.photoUri, regions, aspectRatio)
+      if (uris.isEmpty()) return@launch
+      val index = bulkEntries.indexOfFirst { it.id == id }
+      if (index < 0) return@launch
+      val cutOuts =
+        uris.map { uri ->
+          BulkEntry(
+            id = nextBulkId++,
+            photoUri = uri,
+            name = autoName(null, entry.category),
+            category = entry.category,
+            categoryChosen = entry.categoryChosen,
+            splitReviewed = true,
+          )
+        }
+      bulkEntries.removeAt(index)
+      bulkEntries.addAll(index, cutOuts)
+      for (cutOut in cutOuts) {
+        launch {
+          val colours = repository.detectColours(cutOut.photoUri).ifEmpty { return@launch }
+          updateBulkEntry(cutOut.id) { it.copy(colours = colours).autoNamed() }
+        }
+      }
     }
   }
 
