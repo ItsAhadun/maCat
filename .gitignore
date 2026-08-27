@@ -25,3 +25,6 @@ keystore.properties
 # local copy of the signed release APK — must never be committed
 # (F-Droid's scanner rejects prebuilt binaries in the source tree)
 /releaseapk/
+# real wardrobe photos kept for testing colour detection by hand — big, personal,
+# and nothing the app needs to build
+/real examples/
